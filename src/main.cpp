@@ -144,25 +144,28 @@ void loop() {
       updateEESelection();
     }
   }
-
+  // Pre Roll Jars
   if(currentSelection == 0) {
     setColor(255, 255, 0);
-    if(runbuttonstate == LOW) {
-    runSteps(STEPS_PER_REV);
-  }
-  }
-  else if(currentSelection == 1) {
-    setColor(255, 0, 0);
     if(runbuttonstate == LOW) {
     runSteps(2610);
   }
   }
-  else if(currentSelection == 2) {
-    setColor(0, 255, 0);
+  // Flour Jars
+  else if(currentSelection == 1) {
+    setColor(255, 0, 0);
     if(runbuttonstate == LOW) {
     runSteps(6400);
   }
   }
+  // Pouch Front
+  else if(currentSelection == 2) {
+    setColor(0, 255, 0);
+    if(runbuttonstate == LOW) {
+    runSteps(3200);
+  }
+  }
+  // Pouch Back
   else if(currentSelection == 3) {
     setColor(0, 0, 255);
     if(runbuttonstate == LOW) {
