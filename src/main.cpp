@@ -1,27 +1,14 @@
 #include <Arduino.h>
 #include <AccelStepper.h>
 #include <EEPROMex.h>
+#include <Keypad.h>
+#include <LiquidCrystal_I2C.h>
+#include <Wire.h>
+#include <stdlib.h>
 
-// EEPROM global variables
-#define NUMSELECTIONS 4
-unsigned int addressButton1StateBits;
-int currentSelection;
-boolean button1Pressed = 0;
-boolean previousButton1Pressed = 0;
-unsigned long debounceCount;
-unsigned long blinkMillis;
-unsigned int blinkInterval;
-
-// Define RGB LED Light
-#define LED_R 7
-#define LED_G 6
-#define LED_B 3
 
 // Define the button connections
 #define RUN_BUTTON_PIN  4
-#define LED_BUTTON_PIN  12
-
-int runbuttonstate;
 
 // Define the stepper motor connections
 #define STEP_PIN 2
@@ -31,146 +18,194 @@ int runbuttonstate;
 // Define the motor steps per revolution
 const int STEPS_PER_REV = 3200;
 
+char inputString[16];
+int customStep;
+
 // Create an instance of AccelStepper
 AccelStepper stepper(1, STEP_PIN, DIR_PIN);
 
-void runSteps(int Steps) {
+// Define Keypad
+const byte ROWS = 4; // Four rows
+const byte COLS = 4; // Four columns
+
+char keys[ROWS][COLS] = {
+  {'1','2','3','A'},
+  {'4','5','6','B'},
+  {'7','8','9','C'},
+  {'*','0','#','D'}
+};
+
+byte rowPins[ROWS] = {3, 6, 7, 11};    // Connect to the row pinouts of the keypad
+byte colPins[COLS] = {10, 9, 12, 13};       // Connect to the column pinouts of the keypad
+
+Keypad keypad = Keypad(makeKeymap(keys), rowPins, colPins, ROWS, COLS);
+
+LiquidCrystal_I2C lcd(0x27, 16, 2); // Set the LCD address and dimensions
+
+int currentSelection = 0;
+
+void saveCurrentSelection() {
+  EEPROM.write(0, currentSelection);
+}
+
+void loadCurrentSelection() {
+  currentSelection = EEPROM.read(0);
+}
+
+void clearInputString() {
+  memset(inputString, 0, sizeof(inputString));
+  customStep = 0;
+}
+
+void runSteps(int steps) {
   digitalWrite(ENABLE_PIN, LOW);  // Activates the Stepper motor
-  stepper.moveTo(Steps);  // Moves the Stepper motor a set number of steps
+  stepper.moveTo(steps);  // Moves the Stepper motor a set number of steps
   stepper.runToPosition();
-  stepper.setCurrentPosition(0);  // Resets the Stepper motors current position to 0
+  stepper.setCurrentPosition(0);  // Resets the Stepper motor's current position to 0
   stepper.run();  // Runs the Stepper motor 
   digitalWrite(ENABLE_PIN, HIGH);  // Disables the Stepper motor
   delay(100);
 }
 
-void setColor(int R, int G, int B) {
-  analogWrite(LED_R,  R);
-  analogWrite(LED_G, G);
-  analogWrite(LED_B, B);
-}
-
-byte readEESelection() {
-  // count through the bits of storage until we find a bit set to 1
-  byte i;
-  for (i = 0; i < 32; i++) {
-    byte byteNum, bitNum;
-    byteNum = i / 8;
-    bitNum = i % 8;
-    boolean bitValue = EEPROM.readBit(addressButton1StateBits + byteNum, bitNum);
-    if (bitValue) {
-      break;
-    }
-  }
-  // return the modulus of the bit number, that is the selection number
-  return i % NUMSELECTIONS;
-}
-
-void updateEESelection() {
-  while (readEESelection() != currentSelection) {
-    // count through the bits of storage until we find a bit set to 1
-    // and set that bit to 0 
-    byte i, byteNum, bitNum;
-    for (i = 0; i < 32; i++) {
-      byteNum = i / 8;
-      bitNum = i % 8;
-      if (EEPROM.readBit(addressButton1StateBits + byteNum, bitNum) == 1) {
-        EEPROM.updateBit(addressButton1StateBits + byteNum, bitNum, 0);
-        break;
-      }
-      // if we don't find a bit set to 1, set all to 1 to start search over
-      if (i == 31) { // a bit to clear was not found before the last bit
-        for (i = 0; i < 4; i++) {
-          EEPROM.updateByte(addressButton1StateBits + i, 0xFF);
-        }
-      }
-    }
-  } // while loop repeats until the bits are set so they match selection number
-}
-
 void setup() {
-  //Serial.begin(9600);
-  //Serial.print("\nRestored Selection ");
-  //Serial.println(currentSelection);
-  // EEPROM settings 
-  EEPROM.setMaxAllowedWrites(400);
-  EEPROM.setMemPool(256, EEPROMSizeATmega328);
-  addressButton1StateBits = EEPROM.getAddress(4);
-  currentSelection = readEESelection();
 
-  // RGB pin settings
-  pinMode(LED_R, OUTPUT);
-  pinMode(LED_G, OUTPUT);
-  pinMode(LED_B, OUTPUT);
-
-  // Set button input
   pinMode(RUN_BUTTON_PIN, INPUT_PULLUP);
-  pinMode(LED_BUTTON_PIN, INPUT_PULLUP);
 
-  // Set the maximum speed and acceleration
   stepper.setMaxSpeed(1000.0);
   stepper.setAcceleration(500.0);
-  // Sets the Stepper motors current position to 0
   stepper.setCurrentPosition(0);
-  // Set the motor direction to clockwise
   stepper.setPinsInverted(false, false, true);
 
-  // Enable the motor outputs
   pinMode(ENABLE_PIN, OUTPUT);
-  digitalWrite(ENABLE_PIN, HIGH);  // HIGH disables the Stepper motor
+  digitalWrite(ENABLE_PIN, HIGH);
+
+  keypad.setDebounceTime(50);
+  keypad.setHoldTime(500);
+
+  lcd.begin(16, 2); // Initialize the LCD with the specified dimensions
+  lcd.setCursor(0, 0);
+  lcd.print("Select an option:");
+  lcd.setBacklight(20);
+
+  // Load the current selection from EEPROM
+  loadCurrentSelection();
+
+  // Display the current selection on the LCD
+  lcd.setCursor(0, 1);
+  switch (currentSelection) {
+    case 0:
+      lcd.print("(Pre Roll Jars)");
+      break;
+    case 1:
+      lcd.print("(Flour Jars)");
+      break;
+    case 2:
+      lcd.print("(Pouch Front)");
+      break;
+    case 3:
+      lcd.print("(Pouch Back)");
+      break;
+  }
+
+  clearInputString();
 }
 
 void loop() {
-  runbuttonstate = digitalRead(RUN_BUTTON_PIN);  // Determins if the button is pushed
+  int runButtonState = digitalRead(RUN_BUTTON_PIN);
 
-  // read the button no more often than once every 20 ms, debouncing
-  if (millis() > 20 && debounceCount < millis() - 20) {
-    debounceCount = millis();
-    button1Pressed = !digitalRead(12);
-  }
-  // if the button has been pressed, increment and store selection
-  if (previousButton1Pressed != button1Pressed) {
-    previousButton1Pressed = button1Pressed;
-    // only take action when button is pressed, not when released
-    if (button1Pressed) {
-      // turn off the LED for the old selection
-      //digitalWrite(currentSelection + 2, 1);
-      currentSelection++;
-      currentSelection %= NUMSELECTIONS;
-      // turn on the LED for the new selection
-      //digitalWrite(currentSelection + 2, 0);
-       Serial.print("Current Selection ");
-       Serial.println(currentSelection);
-      updateEESelection();
+  char key = keypad.getKey();
+
+  if (key) {
+    switch (key) {
+      case 'A':
+        currentSelection = 0;
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("Selection:");
+        lcd.setCursor(0, 1);
+        lcd.print("(Pre Roll Jars)");
+        break;
+      case 'B':
+        currentSelection = 1;
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("Selection:");
+        lcd.setCursor(0, 1);
+        lcd.print("(Flour Jars)");
+        break;
+      case 'C':
+        currentSelection = 2;
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("Selection:");
+        lcd.setCursor(0, 1);
+        lcd.print("(Pouch Front)");
+        break;
+      case 'D':
+        currentSelection = 3;
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("Selection:");
+        lcd.setCursor(0, 1);
+        lcd.print("(Pouch Back)");
+        break;
+      case '*':
+        currentSelection = 4;
+        clearInputString();
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("Custom Steps");
+        break;
+      case '#':
+        if (customStep > 0) {
+          inputString[customStep] = '\0';  // Null-terminate the input string
+          int value = atoi(inputString);  // Convert input string to an integer
+          clearInputString();
+          lcd.clear();
+          lcd.setCursor(0, 0);
+          lcd.print("Value entered:");
+          lcd.setCursor(0, 1);
+          lcd.print(value);
+          customStep = value;
+        }
+        break;
+      default:
+        if (customStep < sizeof(inputString) - 1) {
+          inputString[customStep] = key;
+          customStep++;
+          lcd.setCursor(customStep - 1, 1);
+          lcd.print(key);
+        }
+        break;
     }
-  }
-  // Pre Roll Jars
-  if(currentSelection == 0) {
-    setColor(255, 255, 0);
-    if(runbuttonstate == LOW) {
-    runSteps(2610);
-  }
-  }
-  // Flour Jars
-  else if(currentSelection == 1) {
-    setColor(255, 0, 0);
-    if(runbuttonstate == LOW) {
-    runSteps(6400);
-  }
-  }
-  // Pouch Front
-  else if(currentSelection == 2) {
-    setColor(0, 255, 0);
-    if(runbuttonstate == LOW) {
-    runSteps(3200);
-  }
-  }
-  // Pouch Back
-  else if(currentSelection == 3) {
-    setColor(0, 0, 255);
-    if(runbuttonstate == LOW) {
-    runSteps(3600);
-  }
-  }
-}
 
+    saveCurrentSelection();
+  }
+
+  switch (currentSelection) {
+      case 0:  // Pre Roll Jars
+        if (runButtonState == LOW) {
+          runSteps(2610);
+        }
+        break;
+      case 1:  // Flour Jars
+        if (runButtonState == LOW) {
+          runSteps(6400);
+        }
+        break;
+      case 2:  // Pouch Front
+        if (runButtonState == LOW) {
+          runSteps(3200);
+        }
+        break;
+      case 3:  // Pouch Back
+        if (runButtonState == LOW) {
+          runSteps(12800);
+        }
+        break;
+      case 4:  // Custom Steps
+        if (runButtonState == LOW) {
+          runSteps(customStep);
+        }
+    }
+}
