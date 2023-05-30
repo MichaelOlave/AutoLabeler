@@ -19,7 +19,7 @@
 const int STEPS_PER_REV = 3200;
 
 char inputString[16];
-int customStep;
+size_t customStep;
 
 // Create an instance of AccelStepper
 AccelStepper stepper(1, STEP_PIN, DIR_PIN);
@@ -54,10 +54,10 @@ void loadCurrentSelection() {
 
 void clearInputString() {
   memset(inputString, 0, sizeof(inputString));
-  customStep = 0;
+  customStep = 0u;
 }
 
-void runSteps(int steps) {
+void runSteps(size_t steps) {
   digitalWrite(ENABLE_PIN, LOW);  // Activates the Stepper motor
   stepper.moveTo(steps);  // Moves the Stepper motor a set number of steps
   stepper.runToPosition();
@@ -170,7 +170,7 @@ void loop() {
         }
         break;
       default:
-        if (customStep < sizeof(inputString) - 1) {
+        if (customStep < static_cast<unsigned int>(sizeof(inputString) - 1)) {
           inputString[customStep] = key;
           customStep++;
           lcd.setCursor(customStep - 1, 1);
